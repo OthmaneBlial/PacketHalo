@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_SETTINGS,
+  isDisplaySettings,
   isFlowEvent,
   isRecording,
+  isSettingsPatch,
   isSimulatorCommand,
   type DisplaySettings,
   type FlowEvent,
@@ -19,11 +21,10 @@ import {
 function loadSettings(): DisplaySettings {
   try {
     const saved = localStorage.getItem("packethalo:display-settings");
-    return saved
-      ? {
-          ...DEFAULT_SETTINGS,
-          ...(JSON.parse(saved) as Partial<DisplaySettings>),
-        }
+    if (!saved) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(saved) as unknown;
+    return isSettingsPatch(parsed)
+      ? { ...DEFAULT_SETTINGS, ...parsed }
       : DEFAULT_SETTINGS;
   } catch {
     return DEFAULT_SETTINGS;
@@ -59,6 +60,9 @@ export function useHaloRuntime() {
   const [recording, setRecording] = useState(false);
   const [lastRecording, setLastRecording] = useState<Recording>();
   const [replaying, setReplaying] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<
+    "connecting" | "connected" | "offline"
+  >("connecting");
   const [playhead, setPlayhead] = useState(0);
   const [latestEvents, setLatestEvents] = useState<readonly FlowEvent[]>([]);
   const [stats, setStats] = useState<RuntimeStats>({
@@ -117,10 +121,14 @@ export function useHaloRuntime() {
 
   useEffect(() => {
     renderer.current?.setSettings(settings);
-    localStorage.setItem(
-      "packethalo:display-settings",
-      JSON.stringify(settings),
-    );
+    try {
+      localStorage.setItem(
+        "packethalo:display-settings",
+        JSON.stringify(settings),
+      );
+    } catch {
+      /* Rendering remains functional when browser storage is unavailable. */
+    }
   }, [settings]);
 
   useEffect(() => {
@@ -175,8 +183,24 @@ export function useHaloRuntime() {
       string | undefined;
     const url = resolveStreamUrl(configuredUrl, window.location);
     let socket: WebSocket | undefined;
-    try {
-      socket = new WebSocket(url);
+    let retryTimer: number | undefined;
+    let retryDelay = 500;
+    let disposed = false;
+    const connect = () => {
+      if (disposed) return;
+      setStreamStatus("connecting");
+      try {
+        socket = new WebSocket(url);
+      } catch {
+        setStreamStatus("offline");
+        retryTimer = window.setTimeout(connect, retryDelay);
+        retryDelay = Math.min(10_000, retryDelay * 2);
+        return;
+      }
+      socket.addEventListener("open", () => {
+        retryDelay = 500;
+        setStreamStatus("connected");
+      });
       socket.addEventListener("message", (message) => {
         try {
           const data = JSON.parse(String(message.data)) as {
@@ -187,7 +211,7 @@ export function useHaloRuntime() {
           };
           if (data.type === "flow" && isFlowEvent(data.event))
             ingest([data.event]);
-          if (data.type === "settings" && data.settings)
+          if (data.type === "settings" && isDisplaySettings(data.settings))
             setSettingsState(data.settings);
           if (
             data.type === "simulator.control" &&
@@ -198,10 +222,20 @@ export function useHaloRuntime() {
           /* Invalid stream entries are ignored at the privacy boundary. */
         }
       });
-    } catch {
-      /* The simulator remains fully functional without a server. */
-    }
-    return () => socket?.close();
+      socket.addEventListener("close", () => {
+        if (disposed) return;
+        setStreamStatus("offline");
+        retryTimer = window.setTimeout(connect, retryDelay);
+        retryDelay = Math.min(10_000, retryDelay * 2);
+      });
+      socket.addEventListener("error", () => socket?.close());
+    };
+    connect();
+    return () => {
+      disposed = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      socket?.close();
+    };
   }, [ingest]);
 
   const resetObservation = useCallback(() => {
@@ -213,15 +247,16 @@ export function useHaloRuntime() {
     setStats({ eventCount: 0, bytes: 0, countries: 0, devices: 0 });
   }, []);
 
-  const setSettings = useCallback(
-    (patch: Partial<DisplaySettings>) =>
-      setSettingsState((current) => ({ ...current, ...patch })),
-    [],
-  );
+  const setSettings = useCallback((patch: Partial<DisplaySettings>) => {
+    if (!isSettingsPatch(patch)) return;
+    setSettingsState((current) => ({ ...current, ...patch }));
+  }, []);
   const setScenario = useCallback(
     (id: string, requestedSeed = seed) => {
-      engine.current.setScenario(id, requestedSeed);
-      setScenarioIdState(id);
+      const resolved =
+        SCENARIOS.find((scenario) => scenario.id === id) ?? SCENARIOS[0]!;
+      engine.current.setScenario(resolved.id, requestedSeed);
+      setScenarioIdState(resolved.id);
       setSeedState(requestedSeed);
       setPaused(false);
       setReplaying(false);
@@ -231,7 +266,7 @@ export function useHaloRuntime() {
   );
   const setSeed = useCallback(
     (value: string) => {
-      const next = value.trim() || "halo-42";
+      const next = (value.trim() || "halo-42").slice(0, 120);
       setSeedState(next);
       engine.current.setScenario(scenarioId, next);
       resetObservation();
@@ -315,6 +350,20 @@ export function useHaloRuntime() {
     return true;
   }, []);
 
+  const clearLocalSession = useCallback(() => {
+    engine.current.setScenario("movie-night", "halo-42");
+    setScenarioIdState("movie-night");
+    setSeedState("halo-42");
+    setPaused(false);
+    setSpeedState(1);
+    setRecording(false);
+    setLastRecording(undefined);
+    setReplaying(false);
+    setPlayhead(0);
+    setSettingsState(DEFAULT_SETTINGS);
+    resetObservation();
+  }, [resetObservation]);
+
   remoteControl.current = (command) => {
     switch (command.action) {
       case "pause":
@@ -344,6 +393,7 @@ export function useHaloRuntime() {
   return {
     setCanvas,
     settings,
+    streamStatus,
     setSettings,
     scenarioId,
     setScenario,
@@ -361,6 +411,7 @@ export function useHaloRuntime() {
     playhead,
     scrub,
     loadRecording,
+    clearLocalSession,
     latestEvents,
     stats,
     metrics,

@@ -12,6 +12,11 @@ services:
       - "${PACKETHALO_SERVER_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - packethalo-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test:
         [
@@ -32,10 +37,19 @@ services:
       target: web
     ports:
       - "${PACKETHALO_WEB_BIND:-127.0.0.1}:8080:80"
+    environment:
+      PACKETHALO_CONTROL_TOKEN: ${PACKETHALO_CONTROL_TOKEN:-}
     depends_on:
       server:
         condition: service_healthy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
   control:
     build:
       context: .
@@ -47,6 +61,13 @@ services:
       server:
         condition: service_healthy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
   simulator:
     build:
       context: .
@@ -60,5 +81,10 @@ services:
       server:
         condition: service_healthy
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
 volumes:
   packethalo-data:

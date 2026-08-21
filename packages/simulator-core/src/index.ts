@@ -1,8 +1,9 @@
-import type {
-  DeviceKind,
-  FlowEvent,
-  Recording,
-  Transport,
+import {
+  MAX_RECORDING_EVENTS,
+  type DeviceKind,
+  type FlowEvent,
+  type Recording,
+  type Transport,
 } from "@packethalo/protocol";
 
 export type ScenarioMood =
@@ -633,7 +634,7 @@ const DEVICES: readonly {
 }[] = [
   {
     id: "macbook",
-    name: "Othmane’s MacBook",
+    name: "Studio MacBook",
     kind: "laptop",
     ip: "192.168.1.42",
     processes: [
@@ -745,6 +746,7 @@ export class SimulatorEngine {
   private pausedValue = false;
   private speedValue: SimulationSpeed = 1;
   private recordingEvents: FlowEvent[] | undefined;
+  private recordingStartedAt: number | undefined;
   private readonly epoch: number;
 
   public constructor(
@@ -777,6 +779,7 @@ export class SimulatorEngine {
     this.sequence = 0;
     this.elapsedMs = 0;
     this.recordingEvents = undefined;
+    this.recordingStartedAt = undefined;
   }
 
   public setSpeed(speed: SimulationSpeed): void {
@@ -804,28 +807,41 @@ export class SimulatorEngine {
       this.scenarioValue.cadenceMs[1],
     );
     this.elapsedMs += Math.max(16, cadence / this.speedValue);
-    this.recordingEvents?.push(...events);
+    if (this.recordingEvents) {
+      this.recordingEvents.push(...events);
+      if (this.recordingEvents.length > MAX_RECORDING_EVENTS)
+        this.recordingEvents.splice(
+          0,
+          this.recordingEvents.length - MAX_RECORDING_EVENTS,
+        );
+    }
     return events;
   }
 
   public startRecording(): void {
     this.recordingEvents = [];
+    this.recordingStartedAt = this.epoch + this.elapsedMs;
   }
 
   public stopRecording(
     name = `${this.scenarioValue.name} capture`,
   ): Recording | undefined {
     if (!this.recordingEvents) return undefined;
+    const startedAt =
+      this.recordingEvents[0]?.timestamp ??
+      this.recordingStartedAt ??
+      this.epoch + this.elapsedMs;
     const recording: Recording = {
       version: 1,
       name,
       scenarioId: this.scenarioValue.id,
       seed: this.seedValue,
-      startedAt: this.epoch,
-      durationMs: this.elapsedMs,
+      startedAt,
+      durationMs: Math.max(1, this.epoch + this.elapsedMs - startedAt),
       events: this.recordingEvents,
     };
     this.recordingEvents = undefined;
+    this.recordingStartedAt = undefined;
     return recording;
   }
 
@@ -844,7 +860,7 @@ export class SimulatorEngine {
     );
 
     return {
-      id: `${this.seedValue}-${sequence.toString(36)}-${this.random.integer(100, 999)}`,
+      id: `${this.epoch.toString(36)}-${this.seedValue}-${sequence.toString(36)}-${this.random.integer(100, 999)}`,
       timestamp: this.epoch + this.elapsedMs,
       durationMs: this.random.integer(280, 7_600),
       direction: inbound ? "inbound" : "outbound",

@@ -9,6 +9,52 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub fn event_endpoint(raw: &str, allow_remote: bool) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw)
+        .map_err(|_| "PACKETHALO_SERVER must be a valid HTTP(S) URL".to_owned())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "PACKETHALO_SERVER must be an HTTP(S) URL without credentials or a fragment".to_owned(),
+        );
+    }
+    let local = url.host_str().is_some_and(local_hostname);
+    if !local && !allow_remote {
+        return Err(
+            "PACKETHALO_SERVER must be local; set PACKETHALO_ALLOW_REMOTE=1 explicitly for a remote collector"
+                .to_owned(),
+        );
+    }
+    if !local && url.scheme() != "https" {
+        return Err("Remote PACKETHALO_SERVER endpoints must use HTTPS".to_owned());
+    }
+    Ok(url)
+}
+
+fn local_hostname(hostname: &str) -> bool {
+    if hostname.eq_ignore_ascii_case("localhost")
+        || hostname.ends_with(".local")
+        || !hostname.contains('.')
+    {
+        return true;
+    }
+    hostname
+        .parse::<IpAddr>()
+        .is_ok_and(|address| match address {
+            IpAddr::V4(address) => {
+                address.is_private() || address.is_loopback() || address.is_link_local()
+            }
+            IpAddr::V6(address) => {
+                address.is_loopback()
+                    || address.is_unique_local()
+                    || address.is_unicast_link_local()
+            }
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SocketKey {
     pub local_ip: IpAddr,
@@ -267,7 +313,7 @@ fn process_names_by_inode() -> HashMap<u64, String> {
         let path = process.path();
         let name = fs::read_to_string(path.join("comm"))
             .ok()
-            .map(|value| value.trim().to_owned());
+            .map(|value| value.trim().chars().take(120).collect::<String>());
         let Some(name) = name else { continue };
         let Ok(descriptors) = fs::read_dir(path.join("fd")) else {
             continue;
@@ -328,5 +374,16 @@ mod tests {
         for forbidden in ["payload", "body", "cookie", "password", "token"] {
             assert!(!json.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn collector_endpoint_is_local_first_and_redirect_safe_by_policy() {
+        assert!(event_endpoint("http://127.0.0.1:8787/api/events", false).is_ok());
+        assert!(event_endpoint("http://halo.local:8787/api/events", false).is_ok());
+        assert!(event_endpoint("http://192.168.1.20:8787/api/events", false).is_ok());
+        assert!(event_endpoint("https://collector.example/api/events", false).is_err());
+        assert!(event_endpoint("http://collector.example/api/events", true).is_err());
+        assert!(event_endpoint("https://collector.example/api/events", true).is_ok());
+        assert!(event_endpoint("file:///tmp/events", false).is_err());
     }
 }

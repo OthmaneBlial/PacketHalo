@@ -4,6 +4,8 @@ import {
   constellationAnchor,
   easedProgress,
   eventMotionRate,
+  forensicBaseline,
+  forensicHorizontalInset,
   polarDestination,
   stableHash,
 } from "./index";
@@ -44,5 +46,12 @@ describe("renderer layout", () => {
     expect(easedProgress(0.25)).toBeLessThan(0.25);
     expect(easedProgress(0.75)).toBeGreaterThan(0.75);
     expect(easedProgress(1)).toBe(1);
+  });
+
+  it("keeps forensic rows above the desktop instrument dock", () => {
+    expect(forensicBaseline(900)).toBe(730);
+    expect(forensicBaseline(600)).toBe(480);
+    expect(forensicBaseline(1_116, 900)).toBe(838);
+    expect(forensicHorizontalInset(1_786, 1_440)).toBe(197);
   });
 });

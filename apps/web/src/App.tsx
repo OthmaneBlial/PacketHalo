@@ -58,6 +58,7 @@ const THEMES: readonly {
 ];
 
 const SPEEDS = [0.25, 1, 2, 5, 20] as const;
+const MAX_RECORDING_FILE_BYTES = 10 * 1024 * 1024;
 
 export function App() {
   const runtime = useHaloRuntime();
@@ -66,16 +67,11 @@ export function App() {
   const [controlsHidden, setControlsHidden] = useState(false);
   const [seedDraft, setSeedDraft] = useState(runtime.seed);
   const [recordingError, setRecordingError] = useState("");
+  const [recordingNotice, setRecordingNotice] = useState("");
   const importInput = useRef<HTMLInputElement>(null);
-  const [aliases, setAliases] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem("packethalo:device-aliases") || "{}",
-      ) as Record<string, string>;
-    } catch {
-      return {};
-    }
-  });
+  const scenarioDialog = useRef<HTMLElement>(null);
+  const settingsDialog = useRef<HTMLElement>(null);
+  const [aliases, setAliases] = useState<Record<string, string>>(loadAliases);
   const activeScenario =
     SCENARIOS.find((scenario) => scenario.id === runtime.scenarioId) ??
     SCENARIOS[0]!;
@@ -132,7 +128,9 @@ export function App() {
       }
       if (event.key.toLowerCase() === "c") setControlsHidden((value) => !value);
       if (event.key.toLowerCase() === "f")
-        void document.documentElement.requestFullscreen?.();
+        void document.documentElement
+          .requestFullscreen?.()
+          .catch(() => undefined);
       if (event.key === "Escape") {
         setSettingsOpen(false);
         setScenariosOpen(false);
@@ -142,14 +140,52 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [runtime]);
 
-  useEffect(
-    () =>
+  useEffect(() => {
+    try {
       localStorage.setItem(
         "packethalo:device-aliases",
         JSON.stringify(aliases),
-      ),
-    [aliases],
-  );
+      );
+    } catch {
+      /* Aliases remain available for this session when storage is blocked. */
+    }
+  }, [aliases]);
+
+  useEffect(() => {
+    const dialog = scenariosOpen
+      ? scenarioDialog.current
+      : settingsOpen
+        ? settingsDialog.current
+        : undefined;
+    if (!dialog) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      [
+        ...dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((element) => !element.hasAttribute("hidden"));
+    focusable()[0]?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      const first = elements[0];
+      const last = elements.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", trapFocus);
+    return () => {
+      dialog.removeEventListener("keydown", trapFocus);
+      previous?.focus();
+    };
+  }, [scenariosOpen, settingsOpen]);
 
   const selectScenario = (id: string) => {
     runtime.setScenario(id);
@@ -179,11 +215,18 @@ export function App() {
     anchor.href = url;
     anchor.download = `${runtime.lastRecording.scenarioId}-${runtime.lastRecording.seed}.packethalo.json`;
     anchor.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setRecordingError("");
+    setRecordingNotice("Metadata recording exported locally.");
   };
 
   const importRecording = async (file: File | undefined) => {
     if (!file) return;
+    setRecordingNotice("");
+    if (file.size > MAX_RECORDING_FILE_BYTES) {
+      setRecordingError("That recording is larger than the 10 MB local limit.");
+      return;
+    }
     try {
       const loaded = runtime.loadRecording(
         JSON.parse(await file.text()) as unknown,
@@ -193,9 +236,30 @@ export function App() {
           ? ""
           : "That file is not a valid metadata-only PacketHalo recording.",
       );
+      if (loaded)
+        setRecordingNotice("Metadata recording loaded and ready to replay.");
     } catch {
       setRecordingError("That file is not valid JSON.");
     }
+  };
+
+  const clearBrowserData = () => {
+    if (
+      !window.confirm(
+        "Clear local aliases, display preferences, and the in-memory recording? SQLite history is not affected.",
+      )
+    )
+      return;
+    try {
+      localStorage.removeItem("packethalo:device-aliases");
+      localStorage.removeItem("packethalo:display-settings");
+    } catch {
+      /* In-memory data can still be cleared when storage is unavailable. */
+    }
+    setAliases({});
+    runtime.clearLocalSession();
+    setRecordingError("");
+    setRecordingNotice("Browser-only PacketHalo data cleared.");
   };
 
   return (
@@ -243,7 +307,11 @@ export function App() {
         </div>
         <button
           className="quiet-button"
-          onClick={() => void document.documentElement.requestFullscreen?.()}
+          onClick={() =>
+            void document.documentElement
+              .requestFullscreen?.()
+              .catch(() => undefined)
+          }
           title="Fullscreen (F)"
         >
           <ExpandIcon /> <span>Project</span>
@@ -439,10 +507,12 @@ export function App() {
           }}
         >
           <section
+            ref={scenarioDialog}
             className="scenario-library"
             role="dialog"
             aria-modal="true"
             aria-labelledby="scenario-heading"
+            tabIndex={-1}
           >
             <header>
               <div>
@@ -483,6 +553,7 @@ export function App() {
                 <input
                   id="seed"
                   value={seedDraft}
+                  maxLength={120}
                   onChange={(event) => setSeedDraft(event.target.value)}
                 />
                 <button onClick={() => runtime.setSeed(seedDraft)}>
@@ -512,10 +583,12 @@ export function App() {
           }}
         >
           <aside
+            ref={settingsDialog}
             className="control-panel"
             role="dialog"
             aria-modal="true"
             aria-labelledby="controls-heading"
+            tabIndex={-1}
           >
             <header>
               <div>
@@ -642,6 +715,7 @@ export function App() {
                     <input
                       value={aliases[id] || ""}
                       placeholder="Add a local alias"
+                      maxLength={80}
                       onChange={(event) =>
                         setAliases((current) => ({
                           ...current,
@@ -669,6 +743,9 @@ export function App() {
                 >
                   Export current
                 </button>
+                <button className="clear-local" onClick={clearBrowserData}>
+                  Clear browser data
+                </button>
               </div>
               <input
                 ref={importInput}
@@ -680,6 +757,11 @@ export function App() {
                 }
               />
               {recordingError && <strong role="alert">{recordingError}</strong>}
+              {recordingNotice && (
+                <strong className="success-note" role="status">
+                  {recordingNotice}
+                </strong>
+              )}
             </section>
             <section>
               <h3>Projection</h3>
@@ -730,6 +812,10 @@ export function App() {
                   label="frame time"
                 />
               </div>
+              <p className={`bridge-state ${runtime.streamStatus}`}>
+                Local bridge {runtime.streamStatus}. The built-in simulator
+                remains available offline.
+              </p>
             </section>
             <footer>
               <ShieldIcon />
@@ -936,4 +1022,26 @@ function summarize(events: readonly FlowEvent[]): string {
   return [...new Set(events.map((event) => event.classification.label))]
     .slice(-8)
     .join(", ");
+}
+
+function loadAliases(): Record<string, string> {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem("packethalo:device-aliases") || "{}",
+    ) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(
+          ([key, alias]) =>
+            key.length > 0 &&
+            key.length <= 120 &&
+            typeof alias === "string" &&
+            alias.length <= 80,
+        )
+        .slice(0, 100),
+    );
+  } catch {
+    return {};
+  }
 }

@@ -118,8 +118,8 @@ export type ServerMessage =
 const forbiddenFields = new Set([
   "payload",
   "body",
-  "requestBody",
-  "responseBody",
+  "requestbody",
+  "responsebody",
   "cookie",
   "cookies",
   "password",
@@ -129,64 +129,185 @@ const forbiddenFields = new Set([
   "message",
 ]);
 
+const flowKeys = new Set([
+  "id",
+  "timestamp",
+  "durationMs",
+  "direction",
+  "localIp",
+  "remoteIp",
+  "localPort",
+  "remotePort",
+  "protocol",
+  "transport",
+  "geo",
+  "asn",
+  "organization",
+  "process",
+  "processIcon",
+  "deviceId",
+  "deviceName",
+  "deviceKind",
+  "bytes",
+  "packets",
+  "confidence",
+  "captureSource",
+  "classification",
+]);
+const geoKeys = new Set([
+  "latitude",
+  "longitude",
+  "countryCode",
+  "country",
+  "city",
+]);
+const classificationKeys = new Set([
+  "label",
+  "service",
+  "category",
+  "confidence",
+]);
+const recordingKeys = new Set([
+  "version",
+  "name",
+  "scenarioId",
+  "seed",
+  "startedAt",
+  "durationMs",
+  "events",
+]);
+
+export const MAX_RECORDING_EVENTS = 10_000;
+
+function normalizedField(key: string): string {
+  return key.replaceAll(/[-_\s]/g, "").toLowerCase();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>) {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isSafeInteger(
+  value: unknown,
+  minimum = 0,
+  maximum = Number.MAX_SAFE_INTEGER,
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+  );
+}
+
+function isBoundedString(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= minimum &&
+    value.length <= maximum &&
+    value.trim() === value
+  );
+}
+
+function isIpAddress(value: unknown): value is string {
+  if (!isBoundedString(value, 2, 64)) return false;
+  const ipv4 = value.split(".");
+  if (!value.includes(":") && ipv4.length === 4)
+    return ipv4.every(
+      (part) =>
+        /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255,
+    );
+  const [address, zone, ...extra] = value.split("%");
+  return (
+    extra.length === 0 &&
+    !!address &&
+    address.includes(":") &&
+    /^[0-9a-f:.]+$/i.test(address) &&
+    (zone === undefined || /^[a-z0-9_.-]{1,24}$/i.test(zone))
+  );
+}
+
 export function containsForbiddenContent(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.entries(value).some(
     ([key, child]) =>
-      forbiddenFields.has(key) || containsForbiddenContent(child),
+      forbiddenFields.has(normalizedField(key)) ||
+      containsForbiddenContent(child),
   );
 }
 
 export function isFlowEvent(value: unknown): value is FlowEvent {
-  if (!value || typeof value !== "object" || containsForbiddenContent(value))
+  if (
+    !isRecord(value) ||
+    containsForbiddenContent(value) ||
+    !hasOnlyKeys(value, flowKeys)
+  )
     return false;
   const flow = value as Partial<FlowEvent>;
-  const geo = flow.geo as Partial<GeoPoint> | undefined;
-  const classification = flow.classification as
-    Partial<Classification> | undefined;
-  const finite = (entry: unknown): entry is number =>
-    typeof entry === "number" && Number.isFinite(entry);
+  const geo = isRecord(flow.geo) ? flow.geo : undefined;
+  const classification = isRecord(flow.classification)
+    ? flow.classification
+    : undefined;
   const port = (entry: unknown): entry is number =>
-    finite(entry) && Number.isInteger(entry) && entry >= 0 && entry <= 65_535;
+    isSafeInteger(entry, 0, 65_535);
   return (
-    typeof flow.id === "string" &&
-    flow.id.length > 0 &&
-    finite(flow.timestamp) &&
-    finite(flow.durationMs) &&
-    flow.durationMs >= 0 &&
+    isBoundedString(flow.id, 1, 160) &&
+    isSafeInteger(flow.timestamp) &&
+    isSafeInteger(flow.durationMs) &&
     (flow.direction === "inbound" || flow.direction === "outbound") &&
-    typeof flow.localIp === "string" &&
-    typeof flow.remoteIp === "string" &&
+    isIpAddress(flow.localIp) &&
+    isIpAddress(flow.remoteIp) &&
     port(flow.localPort) &&
     port(flow.remotePort) &&
-    typeof flow.protocol === "string" &&
+    isBoundedString(flow.protocol, 1, 64) &&
     ["tcp", "udp", "quic", "icmp"].includes(String(flow.transport)) &&
     !!geo &&
-    finite(geo.latitude) &&
-    finite(geo.longitude) &&
+    hasOnlyKeys(geo, geoKeys) &&
+    isFiniteNumber(geo.latitude) &&
+    geo.latitude >= -90 &&
+    geo.latitude <= 90 &&
+    isFiniteNumber(geo.longitude) &&
+    geo.longitude >= -180 &&
+    geo.longitude <= 180 &&
     typeof geo.countryCode === "string" &&
-    typeof geo.country === "string" &&
-    finite(flow.asn) &&
-    typeof flow.organization === "string" &&
-    (flow.process === undefined || typeof flow.process === "string") &&
-    (flow.processIcon === undefined || typeof flow.processIcon === "string") &&
-    typeof flow.deviceId === "string" &&
-    typeof flow.deviceName === "string" &&
+    /^(?:[A-Z]{2}|XX)$/.test(geo.countryCode) &&
+    isBoundedString(geo.country, 1, 120) &&
+    (geo.city === undefined || isBoundedString(geo.city, 1, 120)) &&
+    isSafeInteger(flow.asn, 0, 4_294_967_295) &&
+    isBoundedString(flow.organization, 1, 180) &&
+    (flow.process === undefined || isBoundedString(flow.process, 1, 160)) &&
+    (flow.processIcon === undefined ||
+      isBoundedString(flow.processIcon, 1, 8)) &&
+    isBoundedString(flow.deviceId, 1, 120) &&
+    isBoundedString(flow.deviceName, 1, 160) &&
     ["laptop", "phone", "tv", "console", "nas", "router", "unknown"].includes(
       String(flow.deviceKind),
     ) &&
-    finite(flow.bytes) &&
-    flow.bytes >= 0 &&
-    finite(flow.packets) &&
-    flow.packets >= 0 &&
-    finite(flow.confidence) &&
+    isSafeInteger(flow.bytes) &&
+    isSafeInteger(flow.packets) &&
+    isFiniteNumber(flow.confidence) &&
     flow.confidence >= 0 &&
     flow.confidence <= 1 &&
     ["simulator", "linux-host", "pcap-metadata", "recording"].includes(
       String(flow.captureSource),
     ) &&
     !!classification &&
-    typeof classification.label === "string" &&
+    hasOnlyKeys(classification, classificationKeys) &&
+    isBoundedString(classification.label, 1, 180) &&
+    (classification.service === undefined ||
+      isBoundedString(classification.service, 1, 120)) &&
     [
       "media",
       "communication",
@@ -197,7 +318,7 @@ export function isFlowEvent(value: unknown): value is FlowEvent {
       "unknown",
       "suspicious",
     ].includes(String(classification.category)) &&
-    finite(classification.confidence) &&
+    isFiniteNumber(classification.confidence) &&
     classification.confidence >= 0 &&
     classification.confidence <= 1
   );
@@ -206,13 +327,7 @@ export function isFlowEvent(value: unknown): value is FlowEvent {
 export function isSettingsPatch(
   value: unknown,
 ): value is Partial<DisplaySettings> {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    containsForbiddenContent(value)
-  )
-    return false;
+  if (!isRecord(value) || containsForbiddenContent(value)) return false;
   const patch = value as Record<string, unknown>;
   const allowed = new Set([
     "mode",
@@ -292,66 +407,96 @@ export function isSettingsPatch(
   if (
     patch.countryFilters !== undefined &&
     (!Array.isArray(patch.countryFilters) ||
-      !patch.countryFilters.every((entry) => typeof entry === "string"))
+      patch.countryFilters.length > 100 ||
+      !patch.countryFilters.every(
+        (entry) => typeof entry === "string" && /^(?:[A-Z]{2}|XX)$/.test(entry),
+      ))
   )
     return false;
   if (
     patch.asnFilters !== undefined &&
     (!Array.isArray(patch.asnFilters) ||
-      !patch.asnFilters.every((entry) => typeof entry === "number"))
+      patch.asnFilters.length > 100 ||
+      !patch.asnFilters.every((entry) =>
+        isSafeInteger(entry, 0, 4_294_967_295),
+      ))
   )
     return false;
   if (
     patch.deviceFilters !== undefined &&
     (!Array.isArray(patch.deviceFilters) ||
-      !patch.deviceFilters.every((entry) => typeof entry === "string"))
+      patch.deviceFilters.length > 100 ||
+      !patch.deviceFilters.every((entry) => isBoundedString(entry, 1, 120)))
   )
     return false;
   return true;
 }
 
+export function isDisplaySettings(value: unknown): value is DisplaySettings {
+  if (!isSettingsPatch(value)) return false;
+  const settings = value as Partial<DisplaySettings>;
+  return (
+    settings.mode !== undefined &&
+    settings.theme !== undefined &&
+    settings.animationSpeed !== undefined &&
+    settings.glow !== undefined &&
+    settings.particleCount !== undefined &&
+    settings.retentionSeconds !== undefined &&
+    settings.projectionRotation !== undefined &&
+    settings.privacyMode !== undefined &&
+    settings.reducedMotion !== undefined &&
+    settings.countryFilters !== undefined &&
+    settings.asnFilters !== undefined &&
+    settings.deviceFilters !== undefined
+  );
+}
+
 export function isRecording(value: unknown): value is Recording {
-  if (!value || typeof value !== "object" || containsForbiddenContent(value))
+  if (
+    !isRecord(value) ||
+    containsForbiddenContent(value) ||
+    !hasOnlyKeys(value, recordingKeys)
+  )
     return false;
   const recording = value as Partial<Recording>;
   return (
     recording.version === 1 &&
-    typeof recording.name === "string" &&
-    typeof recording.scenarioId === "string" &&
-    typeof recording.seed === "string" &&
-    typeof recording.startedAt === "number" &&
-    typeof recording.durationMs === "number" &&
+    isBoundedString(recording.name, 1, 160) &&
+    isBoundedString(recording.scenarioId, 1, 80) &&
+    isBoundedString(recording.seed, 1, 120) &&
+    isSafeInteger(recording.startedAt) &&
+    isSafeInteger(recording.durationMs) &&
     Array.isArray(recording.events) &&
+    recording.events.length <= MAX_RECORDING_EVENTS &&
     recording.events.every(isFlowEvent)
   );
 }
 
 export function isSimulatorCommand(value: unknown): value is SimulatorCommand {
-  if (!value || typeof value !== "object" || containsForbiddenContent(value))
-    return false;
+  if (!isRecord(value) || containsForbiddenContent(value)) return false;
   const command = value as Partial<SimulatorCommand>;
   if (
     ["pause", "resume", "record.toggle", "replay"].includes(
       String(command.action),
     )
   )
-    return true;
+    return hasOnlyKeys(value, new Set(["action"]));
   if (command.action === "speed")
-    return [0.25, 1, 2, 5, 20].includes(Number(command.speed));
+    return (
+      hasOnlyKeys(value, new Set(["action", "speed"])) &&
+      [0.25, 1, 2, 5, 20].includes(Number(command.speed))
+    );
   if (command.action === "scenario") {
     return (
-      typeof command.scenarioId === "string" &&
-      command.scenarioId.length > 0 &&
-      command.scenarioId.length <= 80 &&
-      (command.seed === undefined ||
-        (typeof command.seed === "string" && command.seed.length <= 120))
+      hasOnlyKeys(value, new Set(["action", "scenarioId", "seed"])) &&
+      isBoundedString(command.scenarioId, 1, 80) &&
+      (command.seed === undefined || isBoundedString(command.seed, 1, 120))
     );
   }
   return (
     command.action === "seed" &&
-    typeof command.seed === "string" &&
-    command.seed.length > 0 &&
-    command.seed.length <= 120
+    hasOnlyKeys(value, new Set(["action", "seed"])) &&
+    isBoundedString(command.seed, 1, 120)
   );
 }
 

@@ -828,24 +828,26 @@ export class PacketHaloRenderer {
     const latest = this.visibleFlows().slice(-8).reverse();
     this.context.save();
     this.context.font = "500 10px Manrope, sans-serif";
+    const baseline = forensicBaseline(height, window.innerHeight);
+    const horizontalInset = forensicHorizontalInset(width, window.innerWidth);
     for (let index = 0; index < latest.length; index += 1) {
       const flow = latest[index]!;
       const event = flow.event;
-      const y = height - 34 - index * 18;
+      const y = baseline - index * 18;
       const age = clamp((now - flow.bornAt) / 4_000, 0, 1);
       this.context.fillStyle = palette.text;
       this.context.globalAlpha = 0.62 * (1 - age * 0.45);
       this.context.fillText(
         `${event.transport.toUpperCase()}  ${event.remotePort}  AS${event.asn}  ${event.geo.countryCode}  ${event.process ?? "unknown process"}  ${event.deviceName}  ${event.classification.label}  ${Math.round(event.confidence * 100)}%`,
-        24,
+        horizontalInset,
         y,
       );
     }
     this.context.strokeStyle = palette.faint;
     this.context.globalAlpha = 0.15;
     this.context.beginPath();
-    this.context.moveTo(24, height - 20);
-    this.context.lineTo(width - 24, height - 20);
+    this.context.moveTo(horizontalInset, baseline + 14);
+    this.context.lineTo(width - horizontalInset, baseline + 14);
     this.context.stroke();
     this.context.restore();
   }
@@ -885,6 +887,21 @@ export class PacketHaloRenderer {
           this.settings.deviceFilters.includes(event.deviceId)),
     );
   }
+}
+
+export function forensicBaseline(
+  canvasHeight: number,
+  viewportHeight = canvasHeight,
+): number {
+  const overscan = Math.max(0, (canvasHeight - viewportHeight) / 2);
+  return viewportHeight - (viewportHeight >= 700 ? 170 : 120) + overscan;
+}
+
+export function forensicHorizontalInset(
+  canvasWidth: number,
+  viewportWidth = canvasWidth,
+): number {
+  return Math.max(0, (canvasWidth - viewportWidth) / 2) + 24;
 }
 
 function quadraticPoint(

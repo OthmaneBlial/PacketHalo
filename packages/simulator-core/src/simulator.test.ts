@@ -18,6 +18,12 @@ describe("simulator", () => {
     expect(first.next()).toEqual(second.next());
   });
 
+  it("uses the epoch to avoid persistence collisions across real runs", () => {
+    const first = new SimulatorEngine("movie-night", "same-seed", 1_000);
+    const restarted = new SimulatorEngine("movie-night", "same-seed", 2_000);
+    expect(first.next()[0]?.id).not.toBe(restarted.next()[0]?.id);
+  });
+
   it("records metadata-only playback that can be scrubbed", () => {
     const engine = new SimulatorEngine("movie-night", "recording", 10_000);
     engine.startRecording();

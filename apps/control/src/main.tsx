@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   DEFAULT_SETTINGS,
+  isDisplaySettings,
   type ClientMessage,
   type DisplaySettings,
   type ServerMessage,
@@ -38,13 +39,8 @@ function ControlApp() {
     "connecting",
   );
   const [settings, setSettings] = useState<DisplaySettings>(DEFAULT_SETTINGS);
-  const [endpoint, setEndpoint] = useState(() => {
-    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return (
-      localStorage.getItem("packethalo:control-endpoint") ||
-      `${scheme}//${window.location.hostname}:8787/control`
-    );
-  });
+  const [connectionError, setConnectionError] = useState("");
+  const [endpoint, setEndpoint] = useState(loadEndpoint);
   const [token, setToken] = useState("");
   const [scenarioId, setScenarioId] = useState("movie-night");
   const [simulatorSeed, setSimulatorSeed] = useState("phone-halo-42");
@@ -52,23 +48,48 @@ function ControlApp() {
   const connect = () => {
     socket.current?.close();
     setStatus("connecting");
-    const url = new URL(endpoint);
-    if (token) url.searchParams.set("token", token);
     try {
+      const url = new URL(endpoint);
+      if (
+        (url.protocol !== "ws:" && url.protocol !== "wss:") ||
+        url.username ||
+        url.password
+      )
+        throw new Error("invalid-endpoint");
+      if (token) url.searchParams.set("token", token);
       const next = new WebSocket(url);
       socket.current = next;
       next.addEventListener("open", () => {
+        if (socket.current !== next) return;
         setStatus("connected");
-        localStorage.setItem("packethalo:control-endpoint", endpoint);
+        setConnectionError("");
+        try {
+          localStorage.setItem("packethalo:control-endpoint", endpoint);
+        } catch {
+          /* The connection remains active when browser storage is blocked. */
+        }
       });
-      next.addEventListener("close", () => setStatus("offline"));
-      next.addEventListener("error", () => setStatus("offline"));
+      next.addEventListener("close", () => {
+        if (socket.current !== next) return;
+        setStatus("offline");
+        setConnectionError(
+          "Display unavailable. Check its address and LAN token, then reconnect.",
+        );
+      });
+      next.addEventListener("error", () => next.close());
       next.addEventListener("message", (message) => {
-        const data = JSON.parse(String(message.data)) as ClientMessage;
-        if (data.type === "settings") setSettings(data.settings);
+        try {
+          const data = JSON.parse(String(message.data)) as ClientMessage;
+          if (data.type === "settings" && isDisplaySettings(data.settings))
+            setSettings(data.settings);
+          if (data.type === "error") setConnectionError(data.message);
+        } catch {
+          setConnectionError("The display sent an invalid control message.");
+        }
       });
     } catch {
       setStatus("offline");
+      setConnectionError("Enter a valid ws:// or wss:// display address.");
     }
   };
 
@@ -78,24 +99,32 @@ function ControlApp() {
   }, []);
 
   const update = (patch: Partial<DisplaySettings>) => {
+    if (socket.current?.readyState !== WebSocket.OPEN) {
+      setConnectionError("Connect to the display before changing its light.");
+      return;
+    }
     setSettings((current) => ({ ...current, ...patch }));
-    if (socket.current?.readyState === WebSocket.OPEN)
-      socket.current.send(
-        JSON.stringify({
-          type: "settings.update",
-          patch,
-        } satisfies ServerMessage),
-      );
+    socket.current.send(
+      JSON.stringify({
+        type: "settings.update",
+        patch,
+      } satisfies ServerMessage),
+    );
   };
 
   const controlSimulator = (command: SimulatorCommand) => {
-    if (socket.current?.readyState === WebSocket.OPEN)
-      socket.current.send(
-        JSON.stringify({
-          type: "simulator.update",
-          command,
-        } satisfies ServerMessage),
+    if (socket.current?.readyState !== WebSocket.OPEN) {
+      setConnectionError(
+        "Connect to the display before controlling its scene.",
       );
+      return;
+    }
+    socket.current.send(
+      JSON.stringify({
+        type: "simulator.update",
+        command,
+      } satisfies ServerMessage),
+    );
   };
 
   return (
@@ -107,7 +136,9 @@ function ControlApp() {
             Packet<b>Halo</b>
           </span>
         </div>
-        <span className={`status ${status}`}>{status}</span>
+        <span className={`status ${status}`} role="status">
+          {status}
+        </span>
       </header>
       <section className="hero">
         <small>REMOTE INSTRUMENT</small>
@@ -187,6 +218,7 @@ function ControlApp() {
           <span>
             <input
               value={simulatorSeed}
+              maxLength={120}
               onChange={(event) => setSimulatorSeed(event.target.value)}
             />
             <button
@@ -237,6 +269,7 @@ function ControlApp() {
       <section>
         <h2>Theme</h2>
         <select
+          aria-label="Display theme"
           value={settings.theme}
           onChange={(event) =>
             update({ theme: event.target.value as DisplaySettings["theme"] })
@@ -294,6 +327,7 @@ function ControlApp() {
         <label>
           DISPLAY ADDRESS
           <input
+            type="url"
             value={endpoint}
             onChange={(event) => setEndpoint(event.target.value)}
           />
@@ -303,10 +337,18 @@ function ControlApp() {
           <input
             type="password"
             value={token}
+            maxLength={256}
+            autoComplete="off"
+            spellCheck={false}
             onChange={(event) => setToken(event.target.value)}
           />
         </label>
         <button onClick={connect}>Connect to display</button>
+        {connectionError && (
+          <p className="connection-error" role="alert">
+            {connectionError}
+          </p>
+        )}
       </section>
       <footer>Packet contents are never inspected.</footer>
     </main>
@@ -347,3 +389,18 @@ function ControlRange({
 }
 
 createRoot(document.getElementById("root")!).render(<ControlApp />);
+
+function loadEndpoint(): string {
+  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const configured = import.meta.env.VITE_PACKET_HALO_CONTROL as
+    string | undefined;
+  try {
+    return (
+      localStorage.getItem("packethalo:control-endpoint") ||
+      configured ||
+      `${scheme}//${window.location.hostname}:8787/control`
+    );
+  } catch {
+    return configured || `${scheme}//${window.location.hostname}:8787/control`;
+  }
+}

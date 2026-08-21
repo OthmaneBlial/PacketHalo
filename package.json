@@ -12,26 +12,38 @@
     "dev": "pnpm --parallel --filter @packethalo/server --filter @packethalo/web --filter @packethalo/control dev",
     "dev:web": "pnpm --filter @packethalo/web dev",
     "build": "pnpm -r --if-present build",
+    "build:services": "esbuild apps/server/src/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/services/server.cjs && esbuild apps/simulator/src/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/services/simulator.cjs",
+    "start:server": "node dist/services/server.cjs",
+    "start:simulator": "node dist/services/simulator.cjs",
+    "preview:web": "pnpm --filter @packethalo/web preview",
+    "preview:control": "pnpm --filter @packethalo/control preview",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "test": "pnpm -r --if-present test",
     "bench": "pnpm -r --if-present bench",
     "measure:renderer": "node scripts/measure-renderer.mjs",
+    "capture:docs": "node scripts/capture-docs.mjs",
     "test:e2e": "playwright test",
+    "test:site": "node scripts/test-site.mjs",
     "test:rust": "cargo test --manifest-path agent/rust-agent/Cargo.toml",
     "check:rust": "cargo fmt --manifest-path agent/rust-agent/Cargo.toml --check && cargo clippy --manifest-path agent/rust-agent/Cargo.toml --all-targets -- -D warnings",
     "verify:privacy": "node scripts/verify-privacy.mjs",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm verify:privacy && pnpm build && pnpm test:rust && pnpm check:rust"
+    "verify:docs": "node scripts/verify-docs.mjs",
+    "verify:site": "node scripts/verify-site.mjs",
+    "reset:local": "node scripts/reset-local.mjs",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm verify:privacy && pnpm verify:docs && pnpm verify:site && pnpm build && pnpm build:services && pnpm test:rust && pnpm check:rust"
   },
   "devDependencies": {
-    "@eslint/js": "^9.34.0",
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.55.0",
-    "eslint": "^9.34.0",
-    "globals": "^16.3.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0",
-    "vitest": "^3.2.4"
+    "vitest": "4.1.11"
   }
 }

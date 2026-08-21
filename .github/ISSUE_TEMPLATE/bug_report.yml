@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible PacketHalo problem without sharing private network data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never attach real packet contents, credentials, tokens, browsing history, or private recordings. Prefer the built-in simulator.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Data source
+      options:
+        - Built-in simulator
+        - Imported metadata recording
+        - Linux metadata agent
+        - Docker stack
+        - Other local provider
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser, Node/Rust versions, and PacketHalo revision.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Include the simulator scene, seed, commands, and minimal safe steps.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove IP addresses, device names, paths, tokens, and other private metadata.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I verified that this report contains no secrets, payloads, or private network data.
+          required: true

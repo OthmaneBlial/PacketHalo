@@ -38,6 +38,14 @@ afterAll(async () => {
 });
 
 describe("local server integration", () => {
+  it("reports readiness and hardened response metadata", async () => {
+    const response = await fetch(`${baseUrl}/ready`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    await expect(response.json()).resolves.toMatchObject({ status: "ready" });
+  });
+
   it("persists and streams a validated metadata event", async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/stream`);
     await new Promise<void>((resolve, reject) => {
@@ -76,6 +84,32 @@ describe("local server integration", () => {
       body: JSON.stringify({ ...fixtureFlow(), payload: "never accepted" }),
     });
     expect(response.status).toBe(422);
+
+    const undeclared = await fetch(`${baseUrl}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...fixtureFlow(), privateHostname: "home.lan" }),
+    });
+    expect(undeclared.status).toBe(422);
+
+    const badTimeline = await fetch(
+      `${baseUrl}/api/timeline?since=not-a-number`,
+    );
+    expect(badTimeline.status).toBe(422);
+  });
+
+  it("rejects cross-site WebSocket control from an unrelated origin", async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/control`, {
+      origin: "https://unrelated.example",
+    });
+    const status = await new Promise<number | undefined>((resolve) => {
+      socket.once("unexpected-response", (_request, response) =>
+        resolve(response.statusCode),
+      );
+      socket.once("error", () => resolve(undefined));
+    });
+    expect(status).toBe(401);
+    socket.terminate();
   });
 
   it("applies authenticated control changes to a live display without restart", async () => {
@@ -128,6 +162,17 @@ describe("local server integration", () => {
       }),
     );
     expect(await simulatorCommand).toBe("scenario");
+    const invalidMessage = new Promise<string>((resolve) => {
+      control.on("message", (raw) => {
+        const message = JSON.parse(String(raw)) as {
+          type: string;
+          code?: string;
+        };
+        if (message.type === "error" && message.code) resolve(message.code);
+      });
+    });
+    control.send(JSON.stringify({ type: "unknown-control" }));
+    expect(await invalidMessage).toBe("invalid-message");
     control.send(
       JSON.stringify({
         type: "settings.update",

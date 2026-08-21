@@ -1,11 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
   containsForbiddenContent,
+  isDisplaySettings,
   isFlowEvent,
   isRecording,
   isSimulatorCommand,
   isSettingsPatch,
 } from "./index";
+
+const validFlow = {
+  id: "flow-1",
+  timestamp: 1_000,
+  durationMs: 120,
+  direction: "outbound",
+  localIp: "192.168.1.42",
+  remoteIp: "2001:db8::1",
+  localPort: 52_000,
+  remotePort: 443,
+  protocol: "TLS",
+  transport: "tcp",
+  geo: {
+    latitude: 50.11,
+    longitude: 8.68,
+    countryCode: "DE",
+    country: "Germany",
+    city: "Frankfurt",
+  },
+  asn: 64_496,
+  organization: "Documentation network",
+  process: "browser",
+  deviceId: "test-device",
+  deviceName: "Test device",
+  deviceKind: "laptop",
+  bytes: 4_096,
+  packets: 4,
+  confidence: 0.8,
+  captureSource: "simulator",
+  classification: {
+    label: "Encrypted service",
+    category: "unknown",
+    confidence: 0.8,
+  },
+} as const;
 
 describe("privacy protocol boundary", () => {
   it("rejects nested payload content", () => {
@@ -22,6 +58,31 @@ describe("privacy protocol boundary", () => {
         bytes: 42,
       }),
     ).toBe(false);
+    expect(isFlowEvent(validFlow)).toBe(true);
+  });
+
+  it("rejects undeclared fields and malformed bounded metadata", () => {
+    expect(
+      isFlowEvent({ ...validFlow, secret: "not part of the contract" }),
+    ).toBe(false);
+    expect(
+      isFlowEvent({
+        ...validFlow,
+        geo: { ...validFlow.geo, hostname: "private.example" },
+      }),
+    ).toBe(false);
+    expect(
+      isFlowEvent({
+        ...validFlow,
+        classification: { ...validFlow.classification, detail: "extra" },
+      }),
+    ).toBe(false);
+    expect(isFlowEvent({ ...validFlow, remoteIp: "not an address" })).toBe(
+      false,
+    );
+    expect(
+      isFlowEvent({ ...validFlow, geo: { ...validFlow.geo, latitude: 91 } }),
+    ).toBe(false);
   });
 
   it("accepts bounded live settings and rejects unknown or dangerous values", () => {
@@ -31,6 +92,10 @@ describe("privacy protocol boundary", () => {
     expect(isSettingsPatch({ theme: "invented" })).toBe(false);
     expect(isSettingsPatch({ payload: "not a setting" })).toBe(false);
     expect(isSettingsPatch({ retentionSeconds: 50_000 })).toBe(false);
+    expect(isSettingsPatch({ countryFilters: Array(101).fill("DE") })).toBe(
+      false,
+    );
+    expect(isDisplaySettings({ mode: "halo" })).toBe(false);
   });
 
   it("rejects recordings that contain anything other than metadata events", () => {
@@ -60,5 +125,8 @@ describe("privacy protocol boundary", () => {
     expect(isSimulatorCommand({ action: "scenario", scenarioId: "" })).toBe(
       false,
     );
+    expect(
+      isSimulatorCommand({ action: "pause", undeclared: "ignored before" }),
+    ).toBe(false);
   });
 });

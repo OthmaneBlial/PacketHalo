@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import type { Duplex } from "node:stream";
 import { URL } from "node:url";
 import {
   DEFAULT_SETTINGS,
@@ -17,14 +18,22 @@ import {
 } from "@packethalo/protocol";
 import { WebSocket, WebSocketServer } from "ws";
 import { authorized, readConfig } from "./config";
-import { PLANNED_PROVIDERS } from "./providers";
+import { CAPTURE_PROVIDERS } from "./providers";
 import { FlowStore } from "./store";
 
+const MAX_EVENT_BATCH = 500;
+const MAX_SOCKET_BUFFER = 1_000_000;
 const config = readConfig();
 const store = new FlowStore(config.databasePath);
+const startedAt = Date.now();
 let settings: DisplaySettings = DEFAULT_SETTINGS;
+let acceptedEvents = 0;
+let rejectedEvents = 0;
+let lastAcceptedAt: number | undefined;
+let shuttingDown = false;
 const displays = new Set<WebSocket>();
 const controls = new Set<WebSocket>();
+const responsiveSockets = new WeakSet<WebSocket>();
 
 function cors(request: IncomingMessage, response: ServerResponse): void {
   const origin = request.headers.origin;
@@ -39,6 +48,16 @@ function cors(request: IncomingMessage, response: ServerResponse): void {
   response.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, PATCH, OPTIONS",
+  );
+}
+
+function securityHeaders(response: ServerResponse): void {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  response.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()",
   );
 }
 
@@ -68,18 +87,55 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
-function broadcast(clients: Set<WebSocket>, message: ClientMessage): void {
-  const encoded = JSON.stringify(message);
-  for (const client of clients)
-    if (client.readyState === WebSocket.OPEN) client.send(encoded);
+function send(client: WebSocket, encoded: string): boolean {
+  if (client.readyState !== WebSocket.OPEN) return false;
+  if (client.bufferedAmount > MAX_SOCKET_BUFFER) {
+    client.close(1013, "client too slow");
+    return false;
+  }
+  try {
+    client.send(encoded);
+    return true;
+  } catch {
+    client.terminate();
+    return false;
+  }
 }
 
-function acceptFlow(flow: FlowEvent): void {
-  store.append(flow);
+function broadcast(clients: Set<WebSocket>, message: ClientMessage): void {
+  const encoded = JSON.stringify(message);
+  for (const client of clients) send(client, encoded);
+}
+
+function acceptFlow(flow: FlowEvent): boolean {
+  if (!store.append(flow)) return false;
+  acceptedEvents += 1;
+  lastAcceptedAt = Date.now();
   broadcast(displays, { type: "flow", event: flow });
+  return true;
+}
+
+function log(
+  level: "info" | "warn" | "error",
+  event: string,
+  details: Record<string, string | number | boolean | undefined> = {},
+): void {
+  const entry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    service: "packethalo-server",
+    event,
+    ...details,
+  });
+  (level === "error"
+    ? console.error
+    : level === "warn"
+      ? console.warn
+      : console.log)(entry);
 }
 
 const server = createServer(async (request, response) => {
+  securityHeaders(response);
   cors(request, response);
   if (request.method === "OPTIONS") {
     response.writeHead(204).end();
@@ -97,12 +153,25 @@ const server = createServer(async (request, response) => {
         service: "packethalo-server",
         protocolVersion: 1,
         privacy: "metadata-only",
-        displays: displays.size,
+        uptimeSeconds: Math.floor((Date.now() - startedAt) / 1_000),
+        connections: { displays: displays.size, controls: controls.size },
+        ingest: {
+          acceptedEvents,
+          rejectedEvents,
+          lastAcceptedAt: lastAcceptedAt ?? null,
+        },
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/ready") {
+      json(response, store.ready() ? 200 : 503, {
+        status: store.ready() ? "ready" : "unavailable",
+        storedEvents: store.count(),
       });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/providers") {
-      json(response, 200, { providers: PLANNED_PROVIDERS });
+      json(response, 200, { providers: CAPTURE_PROVIDERS });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/settings") {
@@ -120,10 +189,23 @@ const server = createServer(async (request, response) => {
         json(response, 401, { error: "unauthorized" });
         return;
       }
-      const since = Number(
-        url.searchParams.get("since") || Date.now() - 10 * 60_000,
+      const since = queryInteger(
+        url.searchParams.get("since"),
+        Date.now() - 10 * 60_000,
+        0,
+        Number.MAX_SAFE_INTEGER,
       );
-      json(response, 200, { events: store.recent(since) });
+      const limit = queryInteger(
+        url.searchParams.get("limit"),
+        5_000,
+        1,
+        10_000,
+      );
+      if (since === undefined || limit === undefined) {
+        json(response, 422, { error: "invalid-timeline-query" });
+        return;
+      }
+      json(response, 200, { events: store.recent(since, limit) });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/events") {
@@ -140,14 +222,20 @@ const server = createServer(async (request, response) => {
       const body = await readJson(request);
       const candidateEvents = Array.isArray(body) ? body : [body];
       if (
+        candidateEvents.length === 0 ||
+        candidateEvents.length > MAX_EVENT_BATCH ||
         containsForbiddenContent(body) ||
         !candidateEvents.every(isFlowEvent)
       ) {
+        rejectedEvents += candidateEvents.length || 1;
         json(response, 422, { error: "invalid-metadata-event" });
         return;
       }
-      candidateEvents.forEach(acceptFlow);
-      json(response, 202, { accepted: candidateEvents.length });
+      const accepted = candidateEvents.filter(acceptFlow).length;
+      json(response, 202, {
+        accepted,
+        duplicates: candidateEvents.length - accepted,
+      });
       return;
     }
     if (request.method === "PATCH" && url.pathname === "/api/settings") {
@@ -181,42 +269,62 @@ const server = createServer(async (request, response) => {
     json(response, status, {
       error: status === 413 ? "request-too-large" : "invalid-request",
     });
+    log("warn", "request_rejected", {
+      method: request.method,
+      path: request.url?.split("?", 1)[0],
+      status,
+    });
   }
 });
+
+server.requestTimeout = 15_000;
+server.headersTimeout = 10_000;
+server.keepAliveTimeout = 5_000;
+server.maxRequestsPerSocket = 1_000;
 
 const socketServer = new WebSocketServer({
   noServer: true,
   maxPayload: 256_000,
 });
 server.on("upgrade", (request, socket, head) => {
-  const url = new URL(
-    request.url ?? "/",
-    `http://${request.headers.host ?? "127.0.0.1"}`,
-  );
+  let url: URL;
+  try {
+    url = new URL(
+      request.url ?? "/",
+      `http://${request.headers.host ?? "127.0.0.1"}`,
+    );
+  } catch {
+    rejectUpgrade(socket, 400, "Bad Request");
+    return;
+  }
   if (
     (url.pathname !== "/stream" && url.pathname !== "/control") ||
+    !allowedWebSocketOrigin(request, url) ||
     !authorized(tokenFrom(request, url), config, request.socket.remoteAddress)
   ) {
-    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-    socket.destroy();
+    rejectUpgrade(socket, 401, "Unauthorized");
     return;
   }
   socketServer.handleUpgrade(request, socket, head, (webSocket) => {
     const group = url.pathname === "/control" ? controls : displays;
     group.add(webSocket);
-    webSocket.send(
+    responsiveSockets.add(webSocket);
+    send(
+      webSocket,
       JSON.stringify({
         type: "hello",
         version: 1,
         serverTime: Date.now(),
       } satisfies ClientMessage),
     );
-    webSocket.send(
+    send(
+      webSocket,
       JSON.stringify({ type: "settings", settings } satisfies ClientMessage),
     );
     if (url.pathname === "/stream") {
       for (const event of store.recent(Date.now() - 30_000, 400))
-        webSocket.send(
+        send(
+          webSocket,
           JSON.stringify({ type: "flow", event } satisfies ClientMessage),
         );
     }
@@ -240,16 +348,27 @@ server.on("upgrade", (request, socket, head) => {
             command: message.command,
           });
         } else if (message.type === "ping") {
-          webSocket.send(
+          send(
+            webSocket,
             JSON.stringify({
               type: "hello",
               version: 1,
               serverTime: Date.now(),
             } satisfies ClientMessage),
           );
+        } else {
+          send(
+            webSocket,
+            JSON.stringify({
+              type: "error",
+              code: "invalid-message",
+              message: "Expected a valid control message.",
+            } satisfies ClientMessage),
+          );
         }
       } catch {
-        webSocket.send(
+        send(
+          webSocket,
           JSON.stringify({
             type: "error",
             code: "invalid-message",
@@ -258,6 +377,7 @@ server.on("upgrade", (request, socket, head) => {
         );
       }
     });
+    webSocket.on("pong", () => responsiveSockets.add(webSocket));
     webSocket.on("close", () => group.delete(webSocket));
   });
 });
@@ -266,21 +386,98 @@ const pruneTimer = setInterval(
   () => store.prune(Date.now() - config.retentionMinutes * 60_000),
   60_000,
 );
+const heartbeatTimer = setInterval(() => {
+  for (const socket of [...displays, ...controls]) {
+    if (!responsiveSockets.has(socket)) {
+      socket.terminate();
+      continue;
+    }
+    responsiveSockets.delete(socket);
+    socket.ping();
+  }
+}, 30_000);
+server.on("clientError", (_error, socket) => {
+  rejectUpgrade(socket, 400, "Bad Request");
+});
+server.on("error", (error: NodeJS.ErrnoException) => {
+  clearInterval(pruneTimer);
+  clearInterval(heartbeatTimer);
+  store.close();
+  log("error", "server_error", {
+    code: error.code,
+    message: error.message,
+  });
+  process.exit(1);
+});
 server.listen(config.port, config.host, () => {
-  // This startup line deliberately contains no token, event metadata, or secrets.
-  console.log(
-    `PacketHalo server listening on http://${config.host}:${config.port} (${config.containerLoopback ? "container loopback" : config.host === "127.0.0.1" ? "local-only" : "authenticated LAN mode"})`,
-  );
+  log("info", "server_started", {
+    host: config.host,
+    port: config.port,
+    mode: config.containerLoopback
+      ? "container-loopback"
+      : isLoopbackHost(config.host)
+        ? "local-only"
+        : "authenticated-lan",
+    retentionMinutes: config.retentionMinutes,
+  });
 });
 
 function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
   clearInterval(pruneTimer);
+  clearInterval(heartbeatTimer);
   for (const socket of [...displays, ...controls])
     socket.close(1001, "server shutdown");
+  const forceTimer = setTimeout(() => server.closeAllConnections(), 5_000);
+  forceTimer.unref();
   server.close(() => {
+    clearTimeout(forceTimer);
     store.close();
+    log("info", "server_stopped");
     process.exit(0);
   });
+}
+
+function queryInteger(
+  raw: string | null,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  if (raw === null || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : undefined;
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function allowedWebSocketOrigin(
+  request: IncomingMessage,
+  target: URL,
+): boolean {
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      (isLoopbackHost(parsed.hostname) || parsed.hostname === target.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rejectUpgrade(socket: Duplex, status: number, reason: string): void {
+  socket.write(
+    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+  );
+  socket.destroy();
 }
 
 process.on("SIGINT", shutdown);

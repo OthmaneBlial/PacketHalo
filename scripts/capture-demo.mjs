@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { chromium } from "@playwright/test";
 
 const outputDirectory = process.argv[2];
+const baseUrl = process.env.PACKETHALO_CAPTURE_URL || "http://127.0.0.1:5173";
 if (!outputDirectory)
   throw new Error("Usage: node scripts/capture-demo.mjs OUTPUT_DIRECTORY");
 await mkdir(outputDirectory, { recursive: true });
@@ -10,7 +11,7 @@ const page = await browser.newPage({
   viewport: { width: 960, height: 540 },
   deviceScaleFactor: 1,
 });
-await page.goto("http://127.0.0.1:5173/");
+await page.goto(baseUrl);
 await page.waitForTimeout(2_400);
 for (let frame = 0; frame < 28; frame += 1) {
   if (frame === 16)

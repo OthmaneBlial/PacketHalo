@@ -313,6 +313,12 @@ select,
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
+.connection-error {
+  margin: 10px 0 0;
+  color: #ff9b91;
+  font-size: 9px;
+  line-height: 1.55;
+}
 footer {
   padding-top: 26px;
   text-align: center;

@@ -1,4 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+
+const browserErrors = new WeakMap<BrowserContext, string[]>();
+
+test.beforeEach(async ({ context, page }) => {
+  const errors: string[] = [];
+  browserErrors.set(context, errors);
+  const observe = (observedPage: Page) => {
+    observedPage.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    observedPage.on("pageerror", (error) => errors.push(error.message));
+  };
+  observe(page);
+  context.on("page", observe);
+});
+
+test.afterEach(async ({ context }) => {
+  expect(browserErrors.get(context) ?? []).toEqual([]);
+});
 
 test("starts immediately in a living simulator scene", async ({ page }) => {
   await page.goto("/");
@@ -80,7 +99,7 @@ test("accepts live simulator direction from the phone controller", async ({
   test.skip(testInfo.project.name !== "desktop-chromium");
   await page.goto("/");
   const controller = await page.context().newPage();
-  await controller.goto("http://127.0.0.1:5174/");
+  await controller.goto("http://127.0.0.1:55174/");
   await expect(
     controller.getByText("connected", { exact: true }),
   ).toBeVisible();
@@ -106,6 +125,20 @@ test("is keyboard reachable and honors the ambient instrument reveal", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: /Reveal instruments/ }).click();
   await expect(page.getByLabel("Playback and display controls")).toBeVisible();
+});
+
+test("traps focus inside modal instruments and restores the trigger", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: /Movie night/ });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Choose a living scene" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });
 
 test("keeps its primary controls inside a phone viewport", async ({

@@ -20,6 +20,42 @@
 * {
   box-sizing: border-box;
 }
+.fatal-error {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 14px;
+  padding: 10vw;
+  background: #050707;
+  color: #e8eeeb;
+}
+.fatal-error > span {
+  color: #71877f;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+.fatal-error h1 {
+  margin: 0;
+  font:
+    400 clamp(42px, 8vw, 84px) / 0.95 "Instrument Serif",
+    serif;
+}
+.fatal-error p {
+  max-width: 480px;
+  margin: 0;
+  color: #8da098;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.fatal-error button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(129, 234, 209, 0.45);
+  background: rgba(129, 234, 209, 0.06);
+  color: #81ead1;
+  cursor: pointer;
+}
 html,
 body,
 #root {
@@ -1003,12 +1039,19 @@ kbd {
   opacity: 0.35;
   cursor: not-allowed;
 }
+.recording-controls button.clear-local {
+  grid-column: 1 / -1;
+  color: var(--dim);
+}
 .recording-controls > strong {
   display: block;
   margin-top: 9px;
   color: var(--danger);
   font-size: 8px;
   font-weight: 400;
+}
+.recording-controls > strong.success-note {
+  color: var(--mint);
 }
 .segmented {
   display: grid;
@@ -1098,6 +1141,28 @@ kbd {
 .renderer-health > div {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+}
+.bridge-state {
+  margin: 14px 0 0;
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.55;
+}
+.bridge-state::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.bridge-state.connected::before {
+  background: var(--mint);
+  box-shadow: 0 0 7px var(--mint);
+}
+.bridge-state.offline::before {
+  background: var(--danger);
 }
 .control-panel > footer {
   margin: 10px 30px 30px;
