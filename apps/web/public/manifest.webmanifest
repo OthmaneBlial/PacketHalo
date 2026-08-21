@@ -1,0 +1,17 @@
+{
+  "name": "PacketHalo",
+  "short_name": "PacketHalo",
+  "description": "Ambient, privacy-first network visualization.",
+  "start_url": "/",
+  "display": "fullscreen",
+  "background_color": "#050707",
+  "theme_color": "#050707",
+  "icons": [
+    {
+      "src": "/halo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

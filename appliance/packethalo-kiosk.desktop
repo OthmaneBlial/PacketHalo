@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=PacketHalo Kiosk
+Exec=chromium --kiosk --noerrdialogs --disable-infobars --autoplay-policy=no-user-gesture-required http://127.0.0.1:8080
+X-GNOME-Autostart-enabled=true

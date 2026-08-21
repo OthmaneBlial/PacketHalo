@@ -1,0 +1,330 @@
+:root {
+  color-scheme: dark;
+  font-family: "Manrope", sans-serif;
+  color: #e7eee9;
+  background: #07100e;
+  --mint: #81ead1;
+  --line: rgba(220, 245, 236, 0.15);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 80% -10%, #12342b, transparent 35%), #07100e;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 3px;
+}
+main {
+  width: min(680px, 100%);
+  min-height: 100vh;
+  margin: auto;
+  padding: 22px clamp(18px, 5vw, 38px) 60px;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 42px;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.logo b {
+  color: var(--mint);
+  font-weight: 400;
+}
+.logo i {
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--mint);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 7px var(--mint),
+    0 0 10px #81ead144;
+}
+.status {
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #71877f;
+}
+.status::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-right: 7px;
+  background: #71877f;
+}
+.status.connected {
+  color: var(--mint);
+}
+.status.connected::before {
+  background: var(--mint);
+  box-shadow: 0 0 8px var(--mint);
+}
+.status.offline {
+  color: #ff8a80;
+}
+.status.offline::before {
+  background: #ff8a80;
+}
+.hero {
+  padding: 52px 0 34px;
+  border: 0;
+}
+.hero small,
+h2 {
+  color: #71877f;
+  font-size: 8px;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+.hero h1 {
+  margin: 9px 0 8px;
+  font:
+    400 48px/1 "Instrument Serif",
+    serif;
+}
+.hero p {
+  margin: 0;
+  max-width: 430px;
+  color: #7e918a;
+  font-size: 10px;
+  line-height: 1.7;
+}
+section {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+}
+h2 {
+  margin: 0 0 17px;
+  font-weight: 600;
+}
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+}
+.mode-grid button {
+  min-height: 62px;
+  border: 1px solid var(--line);
+  background: #ffffff05;
+  color: #71877f;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mode-grid button small {
+  font-size: 7px;
+}
+.mode-grid button span {
+  font:
+    400 13px "Instrument Serif",
+    serif;
+  text-transform: capitalize;
+}
+.mode-grid button.active {
+  color: #e7eee9;
+  border-color: #81ead166;
+  background: #81ead10b;
+  box-shadow: inset 0 -1px var(--mint);
+}
+.simulator-controls select {
+  margin-bottom: 9px;
+}
+.simulator-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+}
+.simulator-actions button,
+.simulator-speeds button,
+.simulator-seed button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.018);
+  color: #8fa49c;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.simulator-actions button:hover,
+.simulator-speeds button:hover,
+.simulator-seed button:hover {
+  color: var(--mint);
+  border-color: #81ead155;
+}
+.simulator-speeds {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin-top: 8px;
+}
+.simulator-speeds button {
+  border-right: 0;
+}
+.simulator-speeds button:last-child {
+  border-right: 1px solid var(--line);
+}
+.simulator-seed {
+  display: block;
+  margin-top: 14px;
+  color: #71877f;
+  font-size: 7px;
+  letter-spacing: 0.13em;
+}
+.simulator-seed span {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  margin-top: 7px;
+}
+.simulator-seed input {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: #040908;
+  color: #dce8e3;
+  padding: 0 10px;
+  font-size: 9px;
+}
+.simulator-seed button {
+  padding: 0 14px;
+  border-left: 0;
+}
+.range {
+  display: block;
+  margin: 17px 0;
+}
+.range span {
+  display: flex;
+  justify-content: space-between;
+  color: #bdcbc6;
+  font-size: 10px;
+}
+.range output {
+  color: #71877f;
+}
+.range input {
+  width: 100%;
+  height: 2px;
+  margin-top: 12px;
+  accent-color: var(--mint);
+}
+select,
+.connection input {
+  width: 100%;
+  height: 44px;
+  border: 1px solid var(--line);
+  background: #040908;
+  color: #dce8e3;
+  padding: 0 12px;
+}
+.segments {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.segments button {
+  height: 38px;
+  border: 1px solid var(--line);
+  border-right: 0;
+  background: transparent;
+  color: #71877f;
+}
+.segments button:last-child {
+  border-right: 1px solid var(--line);
+}
+.segments button.active {
+  color: var(--mint);
+  background: #81ead10b;
+}
+.toggles {
+  padding: 0;
+}
+.toggles label {
+  min-height: 72px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.toggles span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.toggles b {
+  font-size: 10px;
+  font-weight: 400;
+}
+.toggles small {
+  color: #60736c;
+  font-size: 8px;
+}
+.toggles input {
+  width: 34px;
+  height: 18px;
+  accent-color: var(--mint);
+}
+.connection label {
+  display: block;
+  margin-top: 14px;
+  color: #71877f;
+  font-size: 7px;
+  letter-spacing: 0.13em;
+}
+.connection label em {
+  float: right;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.connection input {
+  margin-top: 7px;
+  font-size: 10px;
+}
+.connection > button {
+  width: 100%;
+  height: 44px;
+  margin-top: 12px;
+  border: 1px solid #81ead155;
+  background: #81ead10c;
+  color: var(--mint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+footer {
+  padding-top: 26px;
+  text-align: center;
+  color: #60736c;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+@media (max-width: 520px) {
+  .mode-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .hero h1 {
+    font-size: 42px;
+  }
+}

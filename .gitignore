@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+target/
+.env
+.env.*
+!.env.example
+!appliance/.env.appliance.example
+*.db
+*.db-shm
+*.db-wal
+playwright-report/
+test-results/
+.DS_Store

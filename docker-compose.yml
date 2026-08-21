@@ -1,0 +1,64 @@
+name: packethalo
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: server
+    environment:
+      PACKETHALO_CONTAINER_LOOPBACK: "1"
+      PACKETHALO_RETENTION_MINUTES: "60"
+    ports:
+      - "${PACKETHALO_SERVER_BIND:-127.0.0.1}:8787:8787"
+    volumes:
+      - packethalo-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: web
+    ports:
+      - "${PACKETHALO_WEB_BIND:-127.0.0.1}:8080:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+  control:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: control
+    ports:
+      - "${PACKETHALO_CONTROL_BIND:-127.0.0.1}:8081:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+  simulator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: simulator
+    environment:
+      PACKETHALO_SERVER: http://server:8787/api/events
+      PACKETHALO_SCENARIO: movie-night
+      PACKETHALO_SEED: docker-halo-42
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  packethalo-data:

@@ -1,0 +1,37 @@
+{
+  "name": "packethalo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ambient, privacy-first real-time network visualization.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @packethalo/server --filter @packethalo/web --filter @packethalo/control dev",
+    "dev:web": "pnpm --filter @packethalo/web dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r --if-present test",
+    "bench": "pnpm -r --if-present bench",
+    "measure:renderer": "node scripts/measure-renderer.mjs",
+    "test:e2e": "playwright test",
+    "test:rust": "cargo test --manifest-path agent/rust-agent/Cargo.toml",
+    "check:rust": "cargo fmt --manifest-path agent/rust-agent/Cargo.toml --check && cargo clippy --manifest-path agent/rust-agent/Cargo.toml --all-targets -- -D warnings",
+    "verify:privacy": "node scripts/verify-privacy.mjs",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm verify:privacy && pnpm build && pnpm test:rust && pnpm check:rust"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@playwright/test": "^1.55.0",
+    "eslint": "^9.34.0",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  }
+}
